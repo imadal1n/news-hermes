@@ -85,23 +85,35 @@ class TriageResult:
     error: str | None = None
 
 
-def fetch_rss(source: FeedSource, client: HttpClient) -> tuple[RawNewsItem, ...]:
+def fetch_rss(
+    source: FeedSource,
+    client: HttpClient,
+    *,
+    limit: int | None = None,
+) -> tuple[RawNewsItem, ...]:
     text = client.get_text(source.url)
     if text is None:
         return ()
-    return parse_feed(source, text)
+    return parse_feed(source, text, limit=limit)
 
 
-def search_searxng(config: SearxngConfig, client: HttpClient) -> tuple[RawNewsItem, ...]:
+def search_searxng(
+    config: SearxngConfig,
+    client: HttpClient,
+    *,
+    limit: int | None = None,
+) -> tuple[RawNewsItem, ...]:
     items: list[RawNewsItem] = []
     for query in config.queries:
+        if limit is not None and len(items) >= limit:
+            break
         url = f"{config.endpoint.rstrip('/')}/search?{_query_params(query, config.time_range)}"
         value = client.get_text(url)
         if value is None:
             continue
         parsed = parse_json(value)
         if isinstance(parsed, dict):
-            items.extend(_searxng_items(query, parsed))
+            items.extend(_searxng_items(query, parsed, limit=_remaining_limit(limit, len(items))))
     return tuple(items)
 
 
@@ -167,12 +179,25 @@ def _query_params(query: str, time_range: str) -> str:
     return urlencode({"q": query, "format": "json", "time_range": time_range})
 
 
-def _searxng_items(source: str, payload: JsonObject) -> tuple[RawNewsItem, ...]:
+def _remaining_limit(limit: int | None, count: int) -> int | None:
+    if limit is None:
+        return None
+    return max(limit - count, 0)
+
+
+def _searxng_items(
+    source: str,
+    payload: JsonObject,
+    *,
+    limit: int | None = None,
+) -> tuple[RawNewsItem, ...]:
     results = payload.get("results")
     if not isinstance(results, list):
         return ()
     items: list[RawNewsItem] = []
     for result in results:
+        if limit is not None and len(items) >= limit:
+            break
         if not isinstance(result, dict):
             continue
         title = _string(result.get("title"))

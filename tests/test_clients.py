@@ -65,6 +65,27 @@ def test_search_searxng_normalizes_results() -> None:
     assert items[0].source == "model release"
 
 
+def test_search_searxng_stops_after_limit() -> None:
+    # Given: SearXNG returns more results than the source limit.
+    results = [
+        {"title": f"Release {index}", "url": f"https://e.test/{index}"} for index in range(8)
+    ]
+    client = FakeHttpClient(json.dumps({"results": results}))
+    config = SearxngConfig("http://localhost:8888", "day", ("model release",))
+
+    # When: search runs with a limit.
+    items = search_searxng(config, client, limit=5)
+
+    # Then: only the first limited results are materialized.
+    assert [item.url for item in items] == [
+        "https://e.test/0",
+        "https://e.test/1",
+        "https://e.test/2",
+        "https://e.test/3",
+        "https://e.test/4",
+    ]
+
+
 def test_triage_failure_keeps_raw_items_by_returning_no_summaries() -> None:
     # Given: Ollama returns malformed content.
     item = RawNewsItem("Release", "https://e.test", "vendor", SourceType.RSS, None)
