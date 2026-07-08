@@ -19,6 +19,7 @@ class NewsStatus(StrEnum):
 class SourceType(StrEnum):
     RSS = "rss"
     SEARXNG = "searxng"
+    GITHUB_RELEASES = "github_releases"
 
 
 NewsItemJson: TypeAlias = JsonObject
@@ -140,7 +141,7 @@ def parse_item(value: JsonValue) -> ParseItemResult:
     if status is None:
         return "news item status must be new, bookmarked, or dismissed"
     if source_type is None:
-        return "news item source_type must be rss or searxng"
+        return "news item source_type must be rss, searxng, or github_releases"
     return NewsItem(
         id=NewsId(required["id"]),
         title=required["title"],
@@ -167,15 +168,13 @@ def parse_source(value: JsonValue) -> ParseSourceResult:
     if not isinstance(name, str) or not name:
         error = "news source.name must be a non-empty string"
     elif source_type is None:
-        error = "news source.type must be rss or searxng"
+        error = "news source.type must be rss, searxng, or github_releases"
     elif not isinstance(url, str):
         error = "news source.url must be a string"
     elif not isinstance(query, str):
         error = "news source.query must be a string"
-    elif source_type == SourceType.RSS and not url:
-        error = "rss source.url must be a non-empty string"
-    elif source_type == SourceType.SEARXNG and not query:
-        error = "searxng source.query must be a non-empty string"
+    else:
+        error = _source_type_error(source_type, url, query)
     if error is not None:
         return error
     if (
@@ -186,6 +185,14 @@ def parse_source(value: JsonValue) -> ParseSourceResult:
     ):
         return NewsSource(name=SourceName(name), type=source_type, url=url, query=query)
     return "news source is invalid"
+
+
+def _source_type_error(source_type: SourceType, url: str, query: str) -> str | None:
+    if source_type in (SourceType.RSS, SourceType.GITHUB_RELEASES) and not url:
+        return f"{source_type.value} source.url must be a non-empty string"
+    if source_type == SourceType.SEARXNG and not query:
+        return "searxng source.query must be a non-empty string"
+    return None
 
 
 def parse_document(value: JsonValue) -> ParseDocumentResult:

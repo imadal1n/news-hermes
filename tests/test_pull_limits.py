@@ -107,8 +107,8 @@ def test_collect_items_passes_source_limit_to_fetchers(monkeypatch: pytest.Monke
             _ = payload
             return None
 
-    monkeypatch.setattr("news_hermes.tools.fetch_rss", fake_fetch_rss)
-    monkeypatch.setattr("news_hermes.tools.search_searxng", fake_search_searxng)
+    monkeypatch.setattr("news_hermes.sources.fetch_rss", fake_fetch_rss)
+    monkeypatch.setattr("news_hermes.sources.search_searxng", fake_search_searxng)
 
     # When: items are collected with a source limit.
     _ = collect_items(sources, "day", FakeClient(), max_items_per_source=5)

@@ -24,6 +24,13 @@ class RssSource:
 
 
 @dataclass(frozen=True, slots=True)
+class GitHubReleasesSource:
+    name: str
+    repo: str
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
 class SearxngConfig:
     endpoint: str
     time_range: str
@@ -50,6 +57,7 @@ class RetentionConfig:
 class NewsConfig:
     store_path: Path
     rss_sources: tuple[RssSource, ...]
+    github_releases: tuple[GitHubReleasesSource, ...]
     searxng: SearxngConfig
     triage: TriageConfig
     retention: RetentionConfig
@@ -60,6 +68,15 @@ class NewsConfig:
             NewsSource(name=SourceName(source.name), type=SourceType.RSS, url=source.url, query="")
             for source in self.rss_sources
         )
+        github = tuple(
+            NewsSource(
+                name=SourceName(source.name),
+                type=SourceType.GITHUB_RELEASES,
+                url=_github_releases_url(source),
+                query="",
+            )
+            for source in self.github_releases
+        )
         searxng = tuple(
             NewsSource(
                 name=SourceName(f"searxng-{index + 1}"),
@@ -69,13 +86,14 @@ class NewsConfig:
             )
             for index, query in enumerate(self.searxng.queries)
         )
-        return (*rss, *searxng)
+        return (*rss, *github, *searxng)
 
 
 def default_config() -> NewsConfig:
     return NewsConfig(
         store_path=DEFAULT_STORE_PATH,
         rss_sources=(),
+        github_releases=(),
         searxng=SearxngConfig(endpoint="http://127.0.0.1:8080", time_range="day", queries=()),
         triage=TriageConfig(
             ollama_endpoint="http://127.0.0.1:11434",
@@ -119,6 +137,7 @@ def parse_config(value: JsonObject) -> NewsConfig:
     return NewsConfig(
         store_path=Path(_string(value.get("store_path"), str(base.store_path))),
         rss_sources=_rss_sources(_array(sources.get("rss"))),
+        github_releases=_github_releases_sources(_array(sources.get("github_releases"))),
         searxng=_searxng(_object(sources.get("searxng")), base.searxng),
         triage=_triage(triage, base.triage),
         retention=_retention(retention, base.retention),
@@ -142,6 +161,24 @@ def _rss_sources(values: tuple[JsonValue, ...]) -> tuple[RssSource, ...]:
         if name and url:
             sources.append(RssSource(name=name, url=url))
     return tuple(sources)
+
+
+def _github_releases_sources(values: tuple[JsonValue, ...]) -> tuple[GitHubReleasesSource, ...]:
+    sources: list[GitHubReleasesSource] = []
+    for value in values:
+        entry = _object(value)
+        name = _string(entry.get("name"), "")
+        repo = _string(entry.get("repo"), "")
+        url = _string(entry.get("url"), "")
+        if name and (repo or url):
+            sources.append(GitHubReleasesSource(name=name, repo=repo, url=url))
+    return tuple(sources)
+
+
+def _github_releases_url(source: GitHubReleasesSource) -> str:
+    if source.url:
+        return source.url
+    return f"https://api.github.com/repos/{source.repo}/releases"
 
 
 def _searxng(value: JsonObject, base: SearxngConfig) -> SearxngConfig:

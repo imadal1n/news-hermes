@@ -5,10 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal, TypeAlias
 
-from .clients import HttpClient, UrlLibHttpClient, fetch_rss, search_searxng, triage_items
-from .config import SearxngConfig, load_config
+from .clients import HttpClient, UrlLibHttpClient, triage_items
+from .config import load_config
 from .json_types import JsonObject, JsonScalar, JsonValue
 from .models import NewsId, NewsItem, NewsSource, NewsStatus, RawNewsItem, SourceName, SourceType
+from .sources import collect_source
 from .storage import NewsStore, RetentionPolicy
 from .watermark import WatermarkStore
 
@@ -158,16 +159,7 @@ def collect_items(
 ) -> tuple[RawNewsItem, ...]:
     items: list[RawNewsItem] = []
     for source in sources:
-        match source.type:
-            case SourceType.RSS:
-                items.extend(fetch_rss(source, client, limit=max_items_per_source))
-            case SourceType.SEARXNG:
-                searxng = SearxngConfig(
-                    endpoint=source.url,
-                    time_range=time_range,
-                    queries=(source.query,),
-                )
-                items.extend(search_searxng(searxng, client, limit=max_items_per_source))
+        items.extend(collect_source(source, time_range, client, limit=max_items_per_source))
     return tuple(items)
 
 
@@ -201,7 +193,7 @@ def source_from_args(args: ToolArgs) -> NewsSource | str:
     try:
         source_type = SourceType(parsed.raw_type)
     except ValueError:
-        return "type must be rss or searxng"
+        return "type must be rss, searxng, or github_releases"
     if source_type == SourceType.SEARXNG and not parsed.query.strip():
         return "query is required for searxng sources"
     return NewsSource(

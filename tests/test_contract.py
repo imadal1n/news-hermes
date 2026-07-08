@@ -37,6 +37,7 @@ EXPECTED_LAYOUT = [
     "plugin.yaml",
     "py.typed",
     "schemas.py",
+    "sources.py",
     "storage.py",
     "tools.py",
     "watermark.py",
