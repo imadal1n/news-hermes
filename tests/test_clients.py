@@ -34,6 +34,21 @@ class FakeHttpClient:
         return self.response
 
 
+@dataclass(frozen=True, slots=True)
+class RecordingHttpClient:
+    responses: tuple[JsonValue | None, ...]
+    payloads: list[JsonObject]
+
+    def get_text(self, url: str) -> str | None:
+        assert "format=json" in url
+        return ""
+
+    def post_json(self, url: str, payload: JsonObject) -> JsonValue | None:
+        assert url.endswith("/api/chat")
+        self.payloads.append(payload)
+        return self.responses[len(self.payloads) - 1]
+
+
 def test_search_searxng_normalizes_results() -> None:
     # Given: a fake SearXNG JSON result.
     client = FakeHttpClient(
@@ -83,6 +98,23 @@ def test_triage_parses_json_array_from_markdown_fenced_content() -> None:
     assert summaries.error is None
 
 
+def test_triage_parses_json_array_from_inline_markdown_fence() -> None:
+    # Given: Ollama returns fenced JSON on one line.
+    item = RawNewsItem("Release", "https://e.test", "vendor", SourceType.RSS, None)
+    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "ro", 5)
+    response: JsonObject = {
+        "message": {"content": '```json [{"url":"https://e.test","summary":"Rezumat"}] ```'},
+    }
+    client = FakeHttpClient("", response)
+
+    # When: triage runs.
+    summaries = triage_items((item,), config, client)
+
+    # Then: the inline fenced JSON is parsed.
+    assert summaries.summaries == {"https://e.test": "Rezumat"}
+    assert summaries.error is None
+
+
 def test_triage_uses_custom_system_prompt_with_language_placeholder() -> None:
     # Given: triage config includes a user-specific system prompt template.
     item = RawNewsItem("Release", "https://e.test", "vendor", SourceType.RSS, None)
@@ -106,3 +138,74 @@ def test_triage_uses_custom_system_prompt_with_language_placeholder() -> None:
 
     # Then: the configured prompt is sent to Ollama.
     assert summaries.error is None
+
+
+def test_triage_batches_items_and_merges_summaries() -> None:
+    # Given: more raw items than one safe Ollama triage batch.
+    items = tuple(
+        RawNewsItem(f"Release {index}", f"https://e.test/{index}", "vendor", SourceType.RSS, None)
+        for index in range(55)
+    )
+    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "ro", 5)
+    responses = tuple(
+        _triage_response(range(start, min(start + 25, len(items)))) for start in (0, 25, 50)
+    )
+    payloads: list[JsonObject] = []
+    client = RecordingHttpClient(responses, payloads)
+
+    # When: triage runs.
+    summaries = triage_items(items, config, client)
+
+    # Then: requests are chunked and all batch summaries are merged.
+    assert [len(_user_items(payload)) for payload in payloads] == [25, 25, 5]
+    assert summaries.error is None
+    assert summaries.summaries["https://e.test/0"] == "Summary 0"
+    assert summaries.summaries["https://e.test/54"] == "Summary 54"
+    assert len(summaries.summaries) == 55
+
+
+def test_triage_batch_failure_returns_no_partial_summaries() -> None:
+    # Given: the second Ollama batch returns malformed content.
+    items = tuple(
+        RawNewsItem(f"Release {index}", f"https://e.test/{index}", "vendor", SourceType.RSS, None)
+        for index in range(30)
+    )
+    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "ro", 5)
+    payloads: list[JsonObject] = []
+    client = RecordingHttpClient(
+        (_triage_response(range(25)), {"message": {"content": "nope"}}),
+        payloads,
+    )
+
+    # When: triage runs.
+    summaries = triage_items(items, config, client)
+
+    # Then: the caller gets the existing fallback signal without partial results.
+    assert [len(_user_items(payload)) for payload in payloads] == [25, 5]
+    assert summaries.summaries == {}
+    assert summaries.error == "ollama response.message.content was not a JSON array"
+
+
+def _triage_response(indexes: range) -> JsonObject:
+    return {
+        "message": {
+            "content": json.dumps(
+                [
+                    {"url": f"https://e.test/{index}", "summary": f"Summary {index}"}
+                    for index in indexes
+                ],
+            ),
+        },
+    }
+
+
+def _user_items(payload: JsonObject) -> list[JsonValue]:
+    messages = payload["messages"]
+    assert isinstance(messages, list)
+    user_message = messages[1]
+    assert isinstance(user_message, dict)
+    content = user_message["content"]
+    assert isinstance(content, str)
+    parsed = json.loads(content)
+    assert isinstance(parsed, list)
+    return parsed

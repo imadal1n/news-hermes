@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 HTTP_TIMEOUT_SECONDS = 30
 JSON_FENCE: Final = "```"
-FENCED_JSON_MIN_LINES: Final = 3
+TRIAGE_BATCH_SIZE: Final = 25
 LOGGER = logging.getLogger("news_hermes")
 
 
@@ -108,6 +108,20 @@ def triage_items(
 ) -> TriageResult:
     if not items:
         return TriageResult({})
+    summaries: dict[str, str] = {}
+    for batch in _item_batches(items):
+        result = _triage_batch(batch, config, client)
+        if result.error is not None:
+            return result
+        summaries.update(result.summaries)
+    return TriageResult(summaries)
+
+
+def _triage_batch(
+    items: tuple[RawNewsItem, ...],
+    config: TriageConfig,
+    client: HttpClient,
+) -> TriageResult:
     prompt_items = [{"title": item.title, "url": item.url, "source": item.source} for item in items]
     payload: JsonObject = {
         "model": config.model,
@@ -131,6 +145,13 @@ def triage_items(
     if not isinstance(parsed, list):
         return _triage_error("ollama response.message.content was not a JSON array")
     return TriageResult(_summaries(parsed))
+
+
+def _item_batches(items: tuple[RawNewsItem, ...]) -> tuple[tuple[RawNewsItem, ...], ...]:
+    return tuple(
+        items[index : index + TRIAGE_BATCH_SIZE]
+        for index in range(0, len(items), TRIAGE_BATCH_SIZE)
+    )
 
 
 def _triage_error(message: str) -> TriageResult:
@@ -181,10 +202,19 @@ def _json_content(content: str) -> str:
     stripped = content.strip()
     if not stripped.startswith(JSON_FENCE):
         return stripped
-    lines = stripped.splitlines()
-    if len(lines) < FENCED_JSON_MIN_LINES or not lines[-1].strip().startswith(JSON_FENCE):
+    body = stripped[len(JSON_FENCE) :].strip()
+    if not body.endswith(JSON_FENCE):
         return stripped
-    return "\n".join(lines[1:-1]).strip()
+    body = body[: -len(JSON_FENCE)].strip()
+    if not body:
+        return stripped
+    if body[0] not in "[{":
+        parts = body.split(maxsplit=1)
+        try:
+            body = parts[1].strip()
+        except IndexError:
+            return stripped
+    return body
 
 
 def _string(value: JsonValue | None) -> str:
