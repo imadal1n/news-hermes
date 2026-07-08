@@ -1,7 +1,8 @@
 # news-hermes
 
 `news-hermes` is a small Hermes directory plugin for tracking tech news from
-configured RSS/Atom feeds and SearXNG queries with local Ollama triage.
+configured RSS/Atom feeds, SearXNG queries, and GitHub releases with local
+Ollama triage.
 
 The plugin is intentionally runtime-agnostic. It does not assume a specific host,
 workspace, identity, chat bridge, or deployment layout.
@@ -19,7 +20,8 @@ be copied into Hermes' directory-plugin layout.
 - Stores editable sources in `news.json`; add/remove sources through tools without
   editing config or restarting a runtime.
 - Fetches RSS/Atom feeds through `feedparser`.
-- Fetches SearXNG JSON search results when queries are configured.
+- Fetches SearXNG JSON search results when queries are configured (best-effort; unauthenticated, no paging).
+- Fetches GitHub releases from `https://api.github.com/repos/{owner}/{repo}/releases` when sources are configured; skips draft releases and includes prereleases.
 - On first pull, records a bounded feed watermark and ingests no historical items.
 - Triages newly discovered items through a local Ollama model.
 - Keeps raw items with an empty summary and reports `triage_error` if triage is unavailable or malformed.
@@ -99,11 +101,11 @@ Arguments:
 { "silent": true }
 ```
 
-Fetches configured RSS and SearXNG sources, triages new items, ingests them, and
-runs retention purge first. The first pull writes the watermark baseline and
-returns `new_count=0`; later pulls ingest only URLs absent from both the store
-and watermark. `silent=true` returns `new_count`, plus `triage_error` when raw
-items were kept because triage failed.
+Fetches configured RSS, SearXNG, and GitHub releases sources, triages new items,
+ingests them, and runs retention purge first. The first pull writes the watermark
+baseline and returns `new_count=0`; later pulls ingest only URLs absent from both
+the store and watermark. `silent=true` returns `new_count`, plus `triage_error`
+when raw items were kept because triage failed.
 
 ### `news_clear`
 
@@ -125,7 +127,9 @@ Arguments:
 ```
 
 For SearXNG sources, pass `type="searxng"`, `url` as the endpoint, and `query` as
-the search query.
+the search query. For GitHub releases, pass `type="github_releases"` and `url` as
+the full releases API endpoint (`https://api.github.com/repos/{owner}/{repo}/releases`);
+`query` is unused.
 
 ### `news_source_remove`
 
@@ -160,6 +164,9 @@ sources:
   rss:
     - name: example-blog
       url: https://example.test/feed.xml
+  github_releases:
+    - name: example-repo
+      repo: owner/repo
   searxng:
     endpoint: http://127.0.0.1:8080
     time_range: day
@@ -182,6 +189,38 @@ retention:
 
 watermark_dir: /opt/data/watcher-state
 ```
+
+## Source URL and query semantics
+
+Each stored source keeps the same JSON shape:
+
+```json
+{ "name": "...", "type": "...", "url": "...", "query": "..." }
+```
+
+- `rss`: `url` is the feed URL; `query` is empty.
+- `searxng`: `url` is the SearXNG endpoint; `query` is the search query.
+- `github_releases`: `url` is the full GitHub releases API endpoint
+  (`https://api.github.com/repos/{owner}/{repo}/releases`); `query` is empty.
+
+## Minimal config and first pull
+
+Create a YAML config at the default path or point `NEWS_HERMES_CONFIG` to it:
+
+```yaml
+store_path: /opt/data/workspace/news.json
+sources:
+  rss:
+    - name: example-blog
+      url: https://example.test/feed.xml
+  github_releases:
+    - name: example-repo
+      repo: owner/repo
+watermark_dir: /opt/data/watcher-state
+```
+
+Then call the `news_pull` tool through the host runtime. The first pull returns
+`new_count=0`; subsequent pulls ingest only new URLs.
 
 ## Install
 
@@ -213,6 +252,7 @@ $HERMES_HOME/plugins/news-hermes/
   plugin.yaml
   py.typed
   schemas.py
+  sources.py
   storage.py
   tools.py
 ```
