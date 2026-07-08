@@ -91,7 +91,15 @@ def _run_news_pull(config: NewsConfig, args: ToolArgs, kwargs: ToolArgs) -> str:
         return error_json("storage_error", seeded)
     client = UrlLibHttpClient()
     known_urls = {item.url for item in seeded.items}
-    raw_items = collect_items(seeded.sources, config.searxng.time_range, client)
+    raw_items = limit_items_per_source(
+        collect_items(
+            seeded.sources,
+            config.searxng.time_range,
+            client,
+            max_items_per_source=config.triage.max_items_per_source,
+        ),
+        config.triage.max_items_per_source,
+    )
     fresh_items = WatermarkStore.from_dir(config.watermark_dir).fresh_items(
         raw_items,
         frozenset(known_urls),
@@ -145,20 +153,38 @@ def collect_items(
     sources: tuple[NewsSource, ...],
     time_range: str,
     client: HttpClient,
+    *,
+    max_items_per_source: int | None = None,
 ) -> tuple[RawNewsItem, ...]:
     items: list[RawNewsItem] = []
     for source in sources:
         match source.type:
             case SourceType.RSS:
-                items.extend(fetch_rss(source, client))
+                items.extend(fetch_rss(source, client, limit=max_items_per_source))
             case SourceType.SEARXNG:
                 searxng = SearxngConfig(
                     endpoint=source.url,
                     time_range=time_range,
                     queries=(source.query,),
                 )
-                items.extend(search_searxng(searxng, client))
+                items.extend(search_searxng(searxng, client, limit=max_items_per_source))
     return tuple(items)
+
+
+def limit_items_per_source(
+    items: tuple[RawNewsItem, ...],
+    max_items_per_source: int,
+) -> tuple[RawNewsItem, ...]:
+    counts: dict[tuple[SourceType, str], int] = {}
+    limited: list[RawNewsItem] = []
+    for item in items:
+        key = (item.source_type, item.source)
+        count = counts.get(key, 0)
+        if count >= max_items_per_source:
+            continue
+        counts[key] = count + 1
+        limited.append(item)
+    return tuple(limited)
 
 
 def _pull_payload(new_count: int, triage_error: str | None) -> ToolResult:

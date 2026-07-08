@@ -146,7 +146,7 @@ watermark_dir: {watermark_dir}
     new_item = RawNewsItem("New", "https://example.test/new", "vendor", SourceType.RSS, None)
     pulls = [old_items, (*old_items, new_item)]
 
-    def fake_collect_items(*_args: object) -> tuple[RawNewsItem, ...]:
+    def fake_collect_items(*_args: object, **_kwargs: object) -> tuple[RawNewsItem, ...]:
         return pulls.pop(0)
 
     def fake_triage_items(
@@ -188,6 +188,8 @@ sources:
   rss:
     - name: vendor
       url: https://example.test/feed.xml
+triage:
+  max_items_per_source: 600
 watermark_dir: {watermark_dir}
 """,
         encoding="utf-8",
@@ -203,7 +205,7 @@ watermark_dir: {watermark_dir}
         for index in range(600)
     )
 
-    def fake_collect_items(*_args: object) -> tuple[RawNewsItem, ...]:
+    def fake_collect_items(*_args: object, **_kwargs: object) -> tuple[RawNewsItem, ...]:
         return raw_items
 
     monkeypatch.setattr("news_hermes.tools.collect_items", fake_collect_items)
@@ -250,7 +252,7 @@ watermark_dir: {watermark_dir}
     )
     pulls = [first_source, second_source]
 
-    def fake_collect_items(*_args: object) -> tuple[RawNewsItem, ...]:
+    def fake_collect_items(*_args: object, **_kwargs: object) -> tuple[RawNewsItem, ...]:
         return pulls.pop(0)
 
     monkeypatch.setattr("news_hermes.tools.collect_items", fake_collect_items)
