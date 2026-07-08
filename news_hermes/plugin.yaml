@@ -1,0 +1,10 @@
+name: news-hermes
+tools:
+  - news_list
+  - news_bookmark
+  - news_dismiss
+  - news_pull
+  - news_clear
+  - news_source_add
+  - news_source_remove
+  - news_source_list
