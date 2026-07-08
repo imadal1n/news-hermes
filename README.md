@@ -237,6 +237,9 @@ Build the Python package artifacts with:
 uv build
 ```
 
+The standalone repository also includes a GitHub Actions workflow that runs the
+same checks on Python 3.11, 3.12, and 3.13.
+
 ## Non-Goals
 
 - This package does not edit Hermes config.
