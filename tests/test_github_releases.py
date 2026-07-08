@@ -64,6 +64,22 @@ class FakeHttpClient:
         return None
 
 
+@dataclass(frozen=True, slots=True)
+class EndpointHttpClient:
+    expected_url: str
+    text: str | None
+
+    def get_text(self, url: str) -> str | None:
+        if url == self.expected_url:
+            return self.text
+        return None
+
+    def post_json(self, url: str, payload: JsonObject) -> JsonValue | None:
+        _ = url
+        _ = payload
+        return None
+
+
 def github_source(url: str = RELEASES_URL) -> NewsSource:
     return NewsSource(SourceName("repo"), SourceType.GITHUB_RELEASES, url, "")
 
@@ -85,6 +101,18 @@ def test_fetch_github_releases_maps_json_to_raw_items() -> None:
     assert items[0].source_type == SourceType.GITHUB_RELEASES
     assert items[1].title == "v1.1.0-rc1"
     assert items[1].source == "repo"
+
+
+def test_fetch_github_releases_expands_owner_repo_url() -> None:
+    # Given: a stored GitHub releases source uses owner/repo shorthand.
+    source = github_source("owner/repo")
+    client: HttpClient = EndpointHttpClient(RELEASES_URL, RELEASE_JSON)
+
+    # When: releases are fetched.
+    items = fetch_github_releases(source, client)
+
+    # Then: the shorthand is expanded to the GitHub releases API URL.
+    assert len(items) == 2
 
 
 def test_fetch_github_releases_skips_drafts() -> None:

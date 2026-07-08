@@ -12,7 +12,10 @@ def fetch_github_releases(
     *,
     limit: int | None = None,
 ) -> tuple[RawNewsItem, ...]:
-    text = client.get_text(source.url)
+    source_url = source.url.strip()
+    if not source_url.startswith("http"):
+        source_url = f"https://api.github.com/repos/{source_url}/releases"
+    text = client.get_text(source_url)
     if text is None:
         return ()
     parsed = parse_json(text)
