@@ -37,6 +37,7 @@ class TriageConfig:
     temperature: float
     language: str
     max_items_per_source: int
+    system_prompt: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +83,7 @@ def default_config() -> NewsConfig:
             temperature=0.3,
             language="ro",
             max_items_per_source=5,
+            system_prompt=None,
         ),
         retention=RetentionConfig(dismissed_days=7, new_days=14),
         watermark_dir=DEFAULT_WATERMARK_DIR,
@@ -159,6 +161,7 @@ def _triage(value: JsonObject, base: TriageConfig) -> TriageConfig:
         temperature=_float(value.get("temperature"), base.temperature),
         language=_string(value.get("language"), base.language),
         max_items_per_source=_int(value.get("max_items_per_source"), base.max_items_per_source),
+        system_prompt=_optional_string(value.get("system_prompt"), base.system_prompt),
     )
 
 
@@ -182,6 +185,12 @@ def _array(value: JsonValue | None) -> tuple[JsonValue, ...]:
 
 
 def _string(value: JsonValue | None, default: str) -> str:
+    if isinstance(value, str):
+        return value
+    return default
+
+
+def _optional_string(value: JsonValue | None, default: str | None) -> str | None:
     if isinstance(value, str):
         return value
     return default

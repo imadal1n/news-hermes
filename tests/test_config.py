@@ -20,6 +20,7 @@ def test_missing_config_uses_open_source_localhost_defaults() -> None:
     assert config.searxng.endpoint == "http://127.0.0.1:8080"
     assert config.triage.ollama_endpoint == "http://127.0.0.1:11434"
     assert config.triage.model == "ornith:35b"
+    assert config.triage.system_prompt is None
 
 
 def test_config_kwarg_loads_yaml(tmp_path: Path) -> None:
@@ -41,6 +42,8 @@ sources:
 retention:
   dismissed_days: 3
   new_days: 9
+triage:
+  system_prompt: Keep items about Hermes and summarize in {{language}}.
 """.strip(),
         encoding="utf-8",
     )
@@ -55,5 +58,6 @@ retention:
     assert config.seed_sources()[0].name == "vendor"
     assert config.searxng.endpoint == "http://localhost:9999"
     assert config.searxng.queries == ("model release",)
+    assert config.triage.system_prompt == "Keep items about Hermes and summarize in {language}."
     assert config.retention.dismissed_days == 3
     assert config.retention.new_days == 9

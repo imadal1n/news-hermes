@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 class FakeHttpClient:
     text: str
     response: JsonValue | None = None
+    expected_system_prompt: str | None = None
 
     def get_text(self, url: str) -> str | None:
         assert "format=json" in url
@@ -24,6 +25,12 @@ class FakeHttpClient:
     def post_json(self, url: str, payload: JsonObject) -> JsonValue | None:
         assert url.endswith("/api/chat")
         assert payload["model"] == "ornith:35b"
+        if self.expected_system_prompt is not None:
+            messages = payload["messages"]
+            assert isinstance(messages, list)
+            system_message = messages[0]
+            assert isinstance(system_message, dict)
+            assert system_message["content"] == self.expected_system_prompt
         return self.response
 
 
@@ -73,4 +80,29 @@ def test_triage_parses_json_array_from_markdown_fenced_content() -> None:
 
     # Then: the summary is recovered instead of being silently dropped.
     assert summaries.summaries == {"https://e.test": "Rezumat"}
+    assert summaries.error is None
+
+
+def test_triage_uses_custom_system_prompt_with_language_placeholder() -> None:
+    # Given: triage config includes a user-specific system prompt template.
+    item = RawNewsItem("Release", "https://e.test", "vendor", SourceType.RSS, None)
+    config = TriageConfig(
+        "http://localhost:11434",
+        "ornith:35b",
+        0.3,
+        "ro",
+        5,
+        "Keep Hermes and OpenClaw news. Summarize in {language}.",
+    )
+    response: JsonObject = {"message": {"content": "[]"}}
+    client = FakeHttpClient(
+        "",
+        response,
+        expected_system_prompt="Keep Hermes and OpenClaw news. Summarize in ro.",
+    )
+
+    # When: triage runs.
+    summaries = triage_items((item,), config, client)
+
+    # Then: the configured prompt is sent to Ollama.
     assert summaries.error is None

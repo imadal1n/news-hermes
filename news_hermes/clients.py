@@ -114,7 +114,7 @@ def triage_items(
         "stream": False,
         "options": {"temperature": config.temperature},
         "messages": [
-            {"role": "system", "content": _system_prompt(config.language)},
+            {"role": "system", "content": _system_prompt(config)},
             {"role": "user", "content": json.dumps(prompt_items, ensure_ascii=False)},
         ],
     }
@@ -193,11 +193,13 @@ def _string(value: JsonValue | None) -> str:
     return ""
 
 
-def _system_prompt(language: str) -> str:
+def _system_prompt(config: TriageConfig) -> str:
+    if config.system_prompt is not None:
+        return config.system_prompt.replace("{language}", config.language)
     return (
         "You are a tech news triage filter. Keep only genuinely new and relevant items. "
         "Drop noise, ads, listicles, and generic aggregator pages. "
-        f"For each kept item, write a concise summary in {language}. "
+        f"For each kept item, write a concise summary in {config.language}. "
         'Output JSON: [{"title":"...","url":"...","summary":"..."}]. '
         "If nothing is relevant, output []."
     )
