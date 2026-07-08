@@ -39,6 +39,7 @@ EXPECTED_LAYOUT = [
     "schemas.py",
     "storage.py",
     "tools.py",
+    "watermark.py",
 ]
 
 

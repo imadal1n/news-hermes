@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from news_hermes.clients import TriageResult
 from news_hermes.json_types import JsonObject, JsonValue, parse_json_object
 from news_hermes.models import RawNewsItem, SourceType
 from news_hermes.storage import NewsStore
@@ -10,6 +11,7 @@ from news_hermes.tools import (
     news_clear,
     news_dismiss,
     news_list,
+    news_pull,
     news_source_add,
     news_source_list,
     news_source_remove,
@@ -17,6 +19,8 @@ from news_hermes.tools import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pytest
 
 
 def parse_result(result: str) -> JsonObject:
@@ -114,3 +118,105 @@ def test_news_source_tools_manage_sources_in_store(tmp_path: Path) -> None:
     remaining = [json_object(source) for source in json_list(removed["sources"])]
     assert [source["name"] for source in sources] == ["vendor", "search"]
     assert [source["name"] for source in remaining] == ["search"]
+
+
+def test_news_pull_baselines_first_run_and_ingests_only_new_items(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given: a configured source with two existing feed items.
+    path = tmp_path / "news.json"
+    config_path = tmp_path / "news-hermes.yaml"
+    watermark_dir = tmp_path / "watermarks"
+    _ = config_path.write_text(
+        f"""
+store_path: {path}
+sources:
+  rss:
+    - name: vendor
+      url: https://example.test/feed.xml
+watermark_dir: {watermark_dir}
+""",
+        encoding="utf-8",
+    )
+    old_items = (
+        RawNewsItem("Old 1", "https://example.test/old-1", "vendor", SourceType.RSS, None),
+        RawNewsItem("Old 2", "https://example.test/old-2", "vendor", SourceType.RSS, None),
+    )
+    new_item = RawNewsItem("New", "https://example.test/new", "vendor", SourceType.RSS, None)
+    pulls = [old_items, (*old_items, new_item)]
+
+    def fake_collect_items(*_args: object) -> tuple[RawNewsItem, ...]:
+        return pulls.pop(0)
+
+    def fake_triage_items(
+        items: tuple[RawNewsItem, ...],
+        *_args: object,
+    ) -> TriageResult:
+        return TriageResult({item.url: "Rezumat" for item in items})
+
+    monkeypatch.setattr("news_hermes.tools.collect_items", fake_collect_items)
+    monkeypatch.setattr("news_hermes.tools.triage_items", fake_triage_items)
+
+    # When: the first pull establishes a baseline and the second pull sees one new URL.
+    first = parse_result(news_pull({}, _news_path=str(path), _news_config=str(config_path)))
+    second = parse_result(news_pull({}, _news_path=str(path), _news_config=str(config_path)))
+
+    # Then: historical items are not ingested, but the next unseen item is stored.
+    assert first["ok"] is True
+    assert first["new_count"] == 0
+    assert second["ok"] is True
+    assert second["new_count"] == 1
+    stored = NewsStore(path).load()
+    assert not isinstance(stored, str)
+    assert [item.url for item in stored.items] == [new_item.url]
+    assert stored.items[0].summary == "Rezumat"
+
+
+def test_news_pull_watermark_keeps_at_most_500_ids(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given: a first pull with more than 500 feed items.
+    path = tmp_path / "news.json"
+    config_path = tmp_path / "news-hermes.yaml"
+    watermark_dir = tmp_path / "watermarks"
+    _ = config_path.write_text(
+        f"""
+store_path: {path}
+sources:
+  rss:
+    - name: vendor
+      url: https://example.test/feed.xml
+watermark_dir: {watermark_dir}
+""",
+        encoding="utf-8",
+    )
+    raw_items = tuple(
+        RawNewsItem(
+            f"Item {index}",
+            f"https://example.test/{index}",
+            "vendor",
+            SourceType.RSS,
+            None,
+        )
+        for index in range(600)
+    )
+
+    def fake_collect_items(*_args: object) -> tuple[RawNewsItem, ...]:
+        return raw_items
+
+    monkeypatch.setattr("news_hermes.tools.collect_items", fake_collect_items)
+
+    # When: the pull establishes the baseline.
+    payload = parse_result(news_pull({}, _news_path=str(path), _news_config=str(config_path)))
+
+    # Then: no historical items are ingested and the watermark is bounded.
+    assert payload["ok"] is True
+    assert payload["new_count"] == 0
+    watermark = parse_json_object(
+        (watermark_dir / "news-hermes-watermark.json").read_text(encoding="utf-8")
+    )
+    assert watermark is not None
+    seen_urls = json_list(watermark["seen_urls"])
+    assert len(seen_urls) == 500

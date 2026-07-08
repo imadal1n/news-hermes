@@ -3,13 +3,17 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal, TypeAlias
+from typing import TYPE_CHECKING, Final, Literal, TypeAlias
 
 from .clients import HttpClient, UrlLibHttpClient, fetch_rss, search_searxng, triage_items
 from .config import SearxngConfig, load_config
 from .json_types import JsonObject, JsonScalar, JsonValue
 from .models import NewsId, NewsItem, NewsSource, NewsStatus, RawNewsItem, SourceName, SourceType
 from .storage import NewsStore, RetentionPolicy
+from .watermark import WatermarkStore
+
+if TYPE_CHECKING:
+    from .config import NewsConfig
 
 ToolArgs: TypeAlias = dict[str, JsonScalar]
 ToolResult: TypeAlias = dict[str, JsonValue]
@@ -72,6 +76,10 @@ def news_pull(args: ToolArgs, **kwargs: JsonScalar) -> str:
     config = load_config(config_kwargs(kwargs))
     if isinstance(config, str):
         return error_json("config_error", config)
+    return _run_news_pull(config, args, kwargs)
+
+
+def _run_news_pull(config: NewsConfig, args: ToolArgs, kwargs: ToolArgs) -> str:
     store = store_from_kwargs(kwargs)
     purge = store.purge_expired(
         RetentionPolicy(config.retention.dismissed_days, config.retention.new_days)
@@ -82,21 +90,27 @@ def news_pull(args: ToolArgs, **kwargs: JsonScalar) -> str:
     if isinstance(seeded, str):
         return error_json("storage_error", seeded)
     client = UrlLibHttpClient()
-    raw_items = collect_items(seeded.sources, config.searxng.time_range, client)
     known_urls = {item.url for item in seeded.items}
-    fresh_items = tuple(item for item in raw_items if item.url not in known_urls)
+    raw_items = collect_items(seeded.sources, config.searxng.time_range, client)
+    fresh_items = WatermarkStore.from_dir(config.watermark_dir).fresh_items(
+        raw_items,
+        frozenset(known_urls),
+    )
+    if isinstance(fresh_items, str):
+        return error_json("watermark_error", fresh_items)
     summaries = triage_items(fresh_items, config.triage, client)
-    ingested = store.ingest(fresh_items, summaries)
+    ingested = store.ingest(fresh_items, summaries.summaries)
     if isinstance(ingested, str):
         return error_json("storage_error", ingested)
     new_items = tuple(
         item for item in ingested.items if item.url in {raw.url for raw in fresh_items}
     )
     if args.get("silent") is False:
-        return success_json(
-            {"new_count": len(new_items), "items": [item.to_json() for item in new_items]}
-        )
-    return success_json({"new_count": len(new_items)})
+        payload = _pull_payload(len(new_items), summaries.error)
+        items: JsonValue = [item.to_json() for item in new_items]
+        payload["items"] = items
+        return success_json(payload)
+    return success_json(_pull_payload(len(new_items), summaries.error))
 
 
 def news_source_add(args: ToolArgs, **kwargs: JsonScalar) -> str:
@@ -145,6 +159,13 @@ def collect_items(
                 )
                 items.extend(search_searxng(searxng, client))
     return tuple(items)
+
+
+def _pull_payload(new_count: int, triage_error: str | None) -> ToolResult:
+    payload: ToolResult = {"new_count": new_count}
+    if triage_error is not None:
+        payload["triage_error"] = triage_error
+    return payload
 
 
 def source_from_args(args: ToolArgs) -> NewsSource | str:

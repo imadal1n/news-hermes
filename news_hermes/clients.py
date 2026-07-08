@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from http.client import HTTPConnection, HTTPSConnection
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 from urllib.parse import urlencode, urlsplit
 
 from .feeds import parse_feed
@@ -14,6 +15,9 @@ if TYPE_CHECKING:
     from .config import SearxngConfig, TriageConfig
 
 HTTP_TIMEOUT_SECONDS = 30
+JSON_FENCE: Final = "```"
+FENCED_JSON_MIN_LINES: Final = 3
+LOGGER = logging.getLogger("news_hermes")
 
 
 class HttpClient(Protocol):
@@ -71,6 +75,12 @@ class UrlLibHttpClient:
             return None
 
 
+@dataclass(frozen=True, slots=True)
+class TriageResult:
+    summaries: dict[str, str]
+    error: str | None = None
+
+
 def fetch_rss(source: FeedSource, client: HttpClient) -> tuple[RawNewsItem, ...]:
     text = client.get_text(source.url)
     if text is None:
@@ -95,9 +105,9 @@ def triage_items(
     items: tuple[RawNewsItem, ...],
     config: TriageConfig,
     client: HttpClient,
-) -> dict[str, str]:
+) -> TriageResult:
     if not items:
-        return {}
+        return TriageResult({})
     prompt_items = [{"title": item.title, "url": item.url, "source": item.source} for item in items]
     payload: JsonObject = {
         "model": config.model,
@@ -110,17 +120,22 @@ def triage_items(
     }
     response = client.post_json(f"{config.ollama_endpoint.rstrip('/')}/api/chat", payload)
     if not isinstance(response, dict):
-        return {}
+        return _triage_error("ollama response was not a JSON object")
     message = response.get("message")
     if not isinstance(message, dict):
-        return {}
+        return _triage_error("ollama response.message was not an object")
     content = message.get("content")
     if not isinstance(content, str):
-        return {}
-    parsed = parse_json(content)
+        return _triage_error("ollama response.message.content was not a string")
+    parsed = parse_json(_json_content(content))
     if not isinstance(parsed, list):
-        return {}
-    return _summaries(parsed)
+        return _triage_error("ollama response.message.content was not a JSON array")
+    return TriageResult(_summaries(parsed))
+
+
+def _triage_error(message: str) -> TriageResult:
+    LOGGER.warning("news-hermes triage error: %s", message)
+    return TriageResult({}, message)
 
 
 def _query_params(query: str, time_range: str) -> str:
@@ -160,6 +175,16 @@ def _summaries(values: list[JsonValue]) -> dict[str, str]:
         if url:
             summaries[url] = summary
     return summaries
+
+
+def _json_content(content: str) -> str:
+    stripped = content.strip()
+    if not stripped.startswith(JSON_FENCE):
+        return stripped
+    lines = stripped.splitlines()
+    if len(lines) < FENCED_JSON_MIN_LINES or not lines[-1].strip().startswith(JSON_FENCE):
+        return stripped
+    return "\n".join(lines[1:-1]).strip()
 
 
 def _string(value: JsonValue | None) -> str:

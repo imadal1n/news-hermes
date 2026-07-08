@@ -53,4 +53,24 @@ def test_triage_failure_keeps_raw_items_by_returning_no_summaries() -> None:
     summaries = triage_items((item,), config, client)
 
     # Then: caller can still store raw items with empty summaries.
-    assert summaries == {}
+    assert summaries.summaries == {}
+    assert summaries.error == "ollama response.message.content was not a JSON array"
+
+
+def test_triage_parses_json_array_from_markdown_fenced_content() -> None:
+    # Given: Ollama wraps the requested JSON array in a markdown code fence.
+    item = RawNewsItem("Release", "https://e.test", "vendor", SourceType.RSS, None)
+    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "ro", 5)
+    response: JsonObject = {
+        "message": {
+            "content": '```json\n[{"url":"https://e.test","summary":"Rezumat"}]\n```',
+        },
+    }
+    client = FakeHttpClient("", response)
+
+    # When: triage runs.
+    summaries = triage_items((item,), config, client)
+
+    # Then: the summary is recovered instead of being silently dropped.
+    assert summaries.summaries == {"https://e.test": "Rezumat"}
+    assert summaries.error is None
