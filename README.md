@@ -20,9 +20,11 @@ be copied into Hermes' directory-plugin layout.
   editing config or restarting a runtime.
 - Fetches RSS/Atom feeds through `feedparser`.
 - Fetches SearXNG JSON search results when queries are configured.
+- On first pull, records a bounded feed watermark and ingests no historical items.
 - Triages newly discovered items through a local Ollama model.
-- Keeps raw items with an empty summary if triage is unavailable or malformed.
+- Keeps raw items with an empty summary and reports `triage_error` if triage is unavailable or malformed.
 - Deduplicates by URL against the store before ingest.
+- Keeps at most 500 recently seen URLs in the watermark file.
 - Uses an atomic temporary-file replace when writing the JSON document.
 - Returns JSON strings from every Hermes tool handler, including errors.
 
@@ -98,7 +100,10 @@ Arguments:
 ```
 
 Fetches configured RSS and SearXNG sources, triages new items, ingests them, and
-runs retention purge first. `silent=true` returns only `new_count`.
+runs retention purge first. The first pull writes the watermark baseline and
+returns `new_count=0`; later pulls ingest only URLs absent from both the store
+and watermark. `silent=true` returns `new_count`, plus `triage_error` when raw
+items were kept because triage failed.
 
 ### `news_clear`
 
