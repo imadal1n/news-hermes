@@ -23,10 +23,14 @@ class FeedEntry(Protocol):
     def get(self, key: str, default: str) -> object: ...
 
 
-def parse_feed(source: FeedSource, text: str) -> tuple[RawNewsItem, ...]:
+def parse_feed(
+    source: FeedSource, text: str, *, limit: int | None = None
+) -> tuple[RawNewsItem, ...]:
     feed = feedparser.parse(text)
     items: list[RawNewsItem] = []
     for entry in feed.entries:
+        if limit is not None and len(items) >= limit:
+            break
         title = _field(entry, "title")
         url = _field(entry, "link")
         if not title or not url:
