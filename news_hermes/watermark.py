@@ -128,6 +128,7 @@ class WatermarkStore:
         for item in items:
             urls = watermark.sources.get(source_key(item))
             if urls is None:
+                fresh.append(item)
                 continue
             if item.url not in urls and item.url not in known_urls:
                 fresh.append(item)

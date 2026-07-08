@@ -255,7 +255,14 @@ watermark_dir: {watermark_dir}
     def fake_collect_items(*_args: object, **_kwargs: object) -> tuple[RawNewsItem, ...]:
         return pulls.pop(0)
 
+    def fake_triage_items(
+        items: tuple[RawNewsItem, ...],
+        *_args: object,
+    ) -> TriageResult:
+        return TriageResult({item.url: "Summary" for item in items})
+
     monkeypatch.setattr("news_hermes.tools.collect_items", fake_collect_items)
+    monkeypatch.setattr("news_hermes.tools.triage_items", fake_triage_items)
     first = parse_result(news_pull({}, _news_path=str(path), _news_config=str(config_path)))
     _ = config_path.write_text(
         f"""
@@ -274,9 +281,9 @@ watermark_dir: {watermark_dir}
     # When: the newly configured source is pulled for the first time.
     second = parse_result(news_pull({}, _news_path=str(path), _news_config=str(config_path)))
 
-    # Then: the new source is baselined instead of backfilled into the store.
+    # Then: the new source produces fresh items because it was never watermarked.
     assert first["new_count"] == 0
-    assert second["new_count"] == 0
+    assert second["new_count"] == 1
     stored = NewsStore(path).load()
     assert not isinstance(stored, str)
-    assert stored.items == ()
+    assert [item.url for item in stored.items] == ["https://example.test/b/old"]
