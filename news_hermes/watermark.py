@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from .json_types import parse_json_object
+from .json_types import JsonValue, parse_json_object
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -17,7 +17,7 @@ WATERMARK_LIMIT: Final[int] = 500
 
 @dataclass(frozen=True, slots=True)
 class NewsWatermark:
-    seen_urls: tuple[str, ...]
+    sources: dict[str, tuple[str, ...]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,17 +35,15 @@ class WatermarkStore:
         known_urls: frozenset[str],
     ) -> tuple[RawNewsItem, ...] | str:
         loaded = self.load()
-        current_urls = tuple(item.url for item in items)
         if isinstance(loaded, str):
             return loaded
         if loaded is None:
-            saved = self.save(NewsWatermark(self._bounded(current_urls)))
+            saved = self.save(NewsWatermark(self._sources_from_items(items, {})))
             if isinstance(saved, str):
                 return saved
             return ()
-        seen = frozenset(loaded.seen_urls)
-        fresh = tuple(item for item in items if item.url not in seen and item.url not in known_urls)
-        saved = self.save(NewsWatermark(self._bounded((*current_urls, *loaded.seen_urls))))
+        fresh = self._fresh_items(items, known_urls, loaded)
+        saved = self.save(NewsWatermark(self._sources_from_items(items, loaded.sources)))
         if isinstance(saved, str):
             return saved
         return fresh
@@ -59,15 +57,18 @@ class WatermarkStore:
             return f"could not read news watermark: {exc}"
         if value is None:
             return "news watermark is not valid JSON"
-        raw_urls = value.get("seen_urls")
-        if not isinstance(raw_urls, list):
-            return "news watermark.seen_urls must be a list"
-        urls: list[str] = []
-        for url in raw_urls:
-            if not isinstance(url, str):
-                return "news watermark.seen_urls entries must be strings"
-            urls.append(url)
-        return NewsWatermark(tuple(urls[: self.limit]))
+        return self._parse_sources(value.get("sources"))
+
+    def _parse_sources(self, raw_sources: JsonValue | None) -> NewsWatermark | str:
+        if not isinstance(raw_sources, dict):
+            return "news watermark.sources must be an object"
+        sources: dict[str, tuple[str, ...]] = {}
+        for key, raw_urls in raw_sources.items():
+            urls = self._parse_urls(raw_urls)
+            if isinstance(urls, str):
+                return urls
+            sources[key] = urls
+        return NewsWatermark(sources)
 
     def save(self, watermark: NewsWatermark) -> str | None:
         try:
@@ -75,7 +76,12 @@ class WatermarkStore:
             temp_path = self.path.with_name(f"{self.path.name}.tmp")
             _ = temp_path.write_text(
                 json.dumps(
-                    {"version": 1, "seen_urls": list(watermark.seen_urls[: self.limit])},
+                    {
+                        "version": 1,
+                        "sources": {
+                            key: list(urls[: self.limit]) for key, urls in watermark.sources.items()
+                        },
+                    },
                     indent=2,
                     ensure_ascii=False,
                 )
@@ -98,3 +104,45 @@ class WatermarkStore:
             if len(result) == self.limit:
                 break
         return tuple(result)
+
+    def _sources_from_items(
+        self,
+        items: tuple[RawNewsItem, ...],
+        previous: dict[str, tuple[str, ...]],
+    ) -> dict[str, tuple[str, ...]]:
+        sources = dict(previous)
+        grouped: dict[str, list[str]] = {}
+        for item in items:
+            grouped.setdefault(source_key(item), []).append(item.url)
+        for key, urls in grouped.items():
+            sources[key] = self._bounded((*tuple(urls), *sources.get(key, ())))
+        return sources
+
+    def _fresh_items(
+        self,
+        items: tuple[RawNewsItem, ...],
+        known_urls: frozenset[str],
+        watermark: NewsWatermark,
+    ) -> tuple[RawNewsItem, ...]:
+        fresh: list[RawNewsItem] = []
+        for item in items:
+            urls = watermark.sources.get(source_key(item))
+            if urls is None:
+                continue
+            if item.url not in urls and item.url not in known_urls:
+                fresh.append(item)
+        return tuple(fresh)
+
+    def _parse_urls(self, raw_urls: JsonValue | None) -> tuple[str, ...] | str:
+        if not isinstance(raw_urls, list):
+            return "news watermark source value must be a list"
+        urls: list[str] = []
+        for url in raw_urls:
+            if not isinstance(url, str):
+                return "news watermark source entries must be strings"
+            urls.append(url)
+        return tuple(urls[: self.limit])
+
+
+def source_key(item: RawNewsItem) -> str:
+    return f"{item.source_type.value}:{item.source}"

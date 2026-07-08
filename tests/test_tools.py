@@ -218,5 +218,63 @@ watermark_dir: {watermark_dir}
         (watermark_dir / "news-hermes-watermark.json").read_text(encoding="utf-8")
     )
     assert watermark is not None
-    seen_urls = json_list(watermark["seen_urls"])
+    sources = json_object(watermark["sources"])
+    seen_urls = json_list(sources["rss:vendor"])
     assert len(seen_urls) == 500
+
+
+def test_news_pull_baselines_new_source_after_existing_watermark(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given: one source has already established a watermark.
+    path = tmp_path / "news.json"
+    config_path = tmp_path / "news-hermes.yaml"
+    watermark_dir = tmp_path / "watermarks"
+    _ = config_path.write_text(
+        f"""
+store_path: {path}
+sources:
+  rss:
+    - name: vendor-a
+      url: https://example.test/a.xml
+watermark_dir: {watermark_dir}
+""",
+        encoding="utf-8",
+    )
+    first_source = (
+        RawNewsItem("Old A", "https://example.test/a/old", "vendor-a", SourceType.RSS, None),
+    )
+    second_source = (
+        RawNewsItem("Old B", "https://example.test/b/old", "vendor-b", SourceType.RSS, None),
+    )
+    pulls = [first_source, second_source]
+
+    def fake_collect_items(*_args: object) -> tuple[RawNewsItem, ...]:
+        return pulls.pop(0)
+
+    monkeypatch.setattr("news_hermes.tools.collect_items", fake_collect_items)
+    first = parse_result(news_pull({}, _news_path=str(path), _news_config=str(config_path)))
+    _ = config_path.write_text(
+        f"""
+store_path: {path}
+sources:
+  rss:
+    - name: vendor-a
+      url: https://example.test/a.xml
+    - name: vendor-b
+      url: https://example.test/b.xml
+watermark_dir: {watermark_dir}
+""",
+        encoding="utf-8",
+    )
+
+    # When: the newly configured source is pulled for the first time.
+    second = parse_result(news_pull({}, _news_path=str(path), _news_config=str(config_path)))
+
+    # Then: the new source is baselined instead of backfilled into the store.
+    assert first["new_count"] == 0
+    assert second["new_count"] == 0
+    stored = NewsStore(path).load()
+    assert not isinstance(stored, str)
+    assert stored.items == ()
