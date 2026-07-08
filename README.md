@@ -172,6 +172,9 @@ triage:
   temperature: 0.3
   language: ro
   max_items_per_source: 5
+  system_prompt: >
+    You are a tech news triage filter. Keep only actionable technical news and
+    write a concise summary in {language}.
 
 retention:
   dismissed_days: 7
