@@ -4,11 +4,14 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from news_hermes import clients
 from news_hermes.clients import search_searxng, triage_items
 from news_hermes.config import SearxngConfig, TriageConfig
 from news_hermes.models import RawNewsItem, SourceType
 
 if TYPE_CHECKING:
+    import pytest
+
     from news_hermes.json_types import JsonObject, JsonValue
 
 
@@ -47,6 +50,56 @@ class RecordingHttpClient:
         assert url.endswith("/api/chat")
         self.payloads.append(payload)
         return self.responses[len(self.payloads) - 1]
+
+
+@dataclass(frozen=True, slots=True)
+class RedirectResponse:
+    status: int
+    body: str
+    location: str | None = None
+
+    def read(self) -> bytes:
+        return self.body.encode("utf-8")
+
+    def getheader(self, name: str) -> str | None:
+        if name.lower() == "location":
+            return self.location
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class RedirectConnection:
+    responses: list[RedirectResponse]
+    requests: list[str]
+
+    def request(self, method: str, path: str, *, headers: dict[str, str]) -> None:
+        assert method == "GET"
+        assert headers["User-Agent"] == "news-hermes/0.1"
+        self.requests.append(path)
+
+    def getresponse(self) -> RedirectResponse:
+        return self.responses.pop(0)
+
+
+def test_url_client_follows_feed_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Given: an RSS endpoint redirects to its canonical feed path.
+    responses = [
+        RedirectResponse(307, "Redirecting...", "/news/rss.xml"),
+        RedirectResponse(200, "<rss><channel /></rss>"),
+    ]
+    requests: list[str] = []
+
+    def fake_connection(*_args: object) -> RedirectConnection:
+        return RedirectConnection(responses, requests)
+
+    monkeypatch.setattr(clients, "_connection", fake_connection)
+
+    # When: text is fetched through the production URL client.
+    text = clients.UrlLibHttpClient().get_text("https://example.test/blog/rss.xml")
+
+    # Then: the caller receives the final feed body, not the redirect body.
+    assert text == "<rss><channel /></rss>"
+    assert requests == ["/blog/rss.xml", "/news/rss.xml"]
 
 
 def test_search_searxng_normalizes_results() -> None:

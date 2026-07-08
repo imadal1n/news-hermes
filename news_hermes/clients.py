@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from http.client import HTTPConnection, HTTPSConnection
 from typing import TYPE_CHECKING, Final, Protocol
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode, urljoin, urlsplit
 
 from .feeds import parse_feed
 from .json_types import JsonObject, JsonValue, parse_json
@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from .config import SearxngConfig, TriageConfig
 
 HTTP_TIMEOUT_SECONDS = 30
+MAX_REDIRECTS: Final = 5
+REDIRECT_STATUSES: Final = frozenset({301, 302, 303, 307, 308})
 JSON_FENCE: Final = "```"
 TRIAGE_BATCH_SIZE: Final = 25
 OUTPUT_JSON_INSTRUCTION: Final = (
@@ -43,6 +45,9 @@ class UrlLibHttpClient:
     timeout_seconds: int = HTTP_TIMEOUT_SECONDS
 
     def get_text(self, url: str) -> str | None:
+        return self._get_text(url, MAX_REDIRECTS)
+
+    def _get_text(self, url: str, redirects_remaining: int) -> str | None:
         parts = urlsplit(url)
         if parts.scheme not in {"http", "https"} or not parts.netloc:
             return None
@@ -53,6 +58,11 @@ class UrlLibHttpClient:
                 path = f"{path}?{parts.query}"
             connection.request("GET", path, headers={"User-Agent": "news-hermes/0.1"})
             response = connection.getresponse()
+            if response.status in REDIRECT_STATUSES:
+                location = response.getheader("Location")
+                if redirects_remaining == 0 or location is None:
+                    return None
+                return self._get_text(urljoin(url, location), redirects_remaining - 1)
             return response.read().decode("utf-8", errors="replace")
         except (TimeoutError, OSError, UnicodeDecodeError):
             return None
