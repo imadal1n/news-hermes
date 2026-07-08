@@ -17,6 +17,10 @@ if TYPE_CHECKING:
 HTTP_TIMEOUT_SECONDS = 30
 JSON_FENCE: Final = "```"
 TRIAGE_BATCH_SIZE: Final = 25
+OUTPUT_JSON_INSTRUCTION: Final = (
+    'Output JSON only: [{"title":"...","url":"...","summary":"..."}]. '
+    "If nothing is relevant, output []."
+)
 LOGGER = logging.getLogger("news_hermes")
 
 
@@ -200,12 +204,14 @@ def _summaries(values: list[JsonValue]) -> dict[str, str]:
 
 def _json_content(content: str) -> str:
     stripped = content.strip()
-    if not stripped.startswith(JSON_FENCE):
+    start = stripped.find(JSON_FENCE)
+    if start == -1:
         return stripped
-    body = stripped[len(JSON_FENCE) :].strip()
-    if not body.endswith(JSON_FENCE):
+    body = stripped[start + len(JSON_FENCE) :].strip()
+    end = body.find(JSON_FENCE)
+    if end == -1:
         return stripped
-    body = body[: -len(JSON_FENCE)].strip()
+    body = body[:end].strip()
     if not body:
         return stripped
     if body[0] not in "[{":
@@ -225,13 +231,13 @@ def _string(value: JsonValue | None) -> str:
 
 def _system_prompt(config: TriageConfig) -> str:
     if config.system_prompt is not None:
-        return config.system_prompt.replace("{language}", config.language)
+        prompt = config.system_prompt.replace("{language}", config.language).strip()
+        return f"{prompt} {OUTPUT_JSON_INSTRUCTION}"
     return (
         "You are a tech news triage filter. Keep only genuinely new and relevant items. "
         "Drop noise, ads, listicles, and generic aggregator pages. "
         f"For each kept item, write a concise summary in {config.language}. "
-        'Output JSON: [{"title":"...","url":"...","summary":"..."}]. '
-        "If nothing is relevant, output []."
+        f"{OUTPUT_JSON_INSTRUCTION}"
     )
 
 

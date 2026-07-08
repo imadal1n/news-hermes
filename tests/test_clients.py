@@ -68,7 +68,7 @@ def test_search_searxng_normalizes_results() -> None:
 def test_triage_failure_keeps_raw_items_by_returning_no_summaries() -> None:
     # Given: Ollama returns malformed content.
     item = RawNewsItem("Release", "https://e.test", "vendor", SourceType.RSS, None)
-    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "ro", 5)
+    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "en", 5)
     client = FakeHttpClient("", {"message": {"content": "not-json"}})
 
     # When: triage runs.
@@ -82,10 +82,10 @@ def test_triage_failure_keeps_raw_items_by_returning_no_summaries() -> None:
 def test_triage_parses_json_array_from_markdown_fenced_content() -> None:
     # Given: Ollama wraps the requested JSON array in a markdown code fence.
     item = RawNewsItem("Release", "https://e.test", "vendor", SourceType.RSS, None)
-    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "ro", 5)
+    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "en", 5)
     response: JsonObject = {
         "message": {
-            "content": '```json\n[{"url":"https://e.test","summary":"Rezumat"}]\n```',
+            "content": '```json\n[{"url":"https://e.test","summary":"Summary"}]\n```',
         },
     }
     client = FakeHttpClient("", response)
@@ -94,16 +94,16 @@ def test_triage_parses_json_array_from_markdown_fenced_content() -> None:
     summaries = triage_items((item,), config, client)
 
     # Then: the summary is recovered instead of being silently dropped.
-    assert summaries.summaries == {"https://e.test": "Rezumat"}
+    assert summaries.summaries == {"https://e.test": "Summary"}
     assert summaries.error is None
 
 
 def test_triage_parses_json_array_from_inline_markdown_fence() -> None:
     # Given: Ollama returns fenced JSON on one line.
     item = RawNewsItem("Release", "https://e.test", "vendor", SourceType.RSS, None)
-    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "ro", 5)
+    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "en", 5)
     response: JsonObject = {
-        "message": {"content": '```json [{"url":"https://e.test","summary":"Rezumat"}] ```'},
+        "message": {"content": '```json [{"url":"https://e.test","summary":"Summary"}] ```'},
     }
     client = FakeHttpClient("", response)
 
@@ -111,7 +111,26 @@ def test_triage_parses_json_array_from_inline_markdown_fence() -> None:
     summaries = triage_items((item,), config, client)
 
     # Then: the inline fenced JSON is parsed.
-    assert summaries.summaries == {"https://e.test": "Rezumat"}
+    assert summaries.summaries == {"https://e.test": "Summary"}
+    assert summaries.error is None
+
+
+def test_triage_parses_json_array_from_fence_surrounded_by_text() -> None:
+    # Given: Ollama adds prose around the fenced JSON payload.
+    item = RawNewsItem("Release", "https://e.test", "vendor", SourceType.RSS, None)
+    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "en", 5)
+    response: JsonObject = {
+        "message": {
+            "content": 'Here is the JSON:\n```json\n[{"url":"https://e.test","summary":"Summary"}]\n```\nDone.',
+        },
+    }
+    client = FakeHttpClient("", response)
+
+    # When: triage runs.
+    summaries = triage_items((item,), config, client)
+
+    # Then: the fenced JSON is extracted from the surrounding prose.
+    assert summaries.summaries == {"https://e.test": "Summary"}
     assert summaries.error is None
 
 
@@ -122,16 +141,17 @@ def test_triage_uses_custom_system_prompt_with_language_placeholder() -> None:
         "http://localhost:11434",
         "ornith:35b",
         0.3,
-        "ro",
+        "en",
         5,
         "Keep Hermes and OpenClaw news. Summarize in {language}.",
     )
     response: JsonObject = {"message": {"content": "[]"}}
-    client = FakeHttpClient(
-        "",
-        response,
-        expected_system_prompt="Keep Hermes and OpenClaw news. Summarize in ro.",
+    expected_prompt = (
+        "Keep Hermes and OpenClaw news. Summarize in en. "
+        'Output JSON only: [{"title":"...","url":"...","summary":"..."}]. '
+        "If nothing is relevant, output []."
     )
+    client = FakeHttpClient("", response, expected_system_prompt=expected_prompt)
 
     # When: triage runs.
     summaries = triage_items((item,), config, client)
@@ -146,7 +166,7 @@ def test_triage_batches_items_and_merges_summaries() -> None:
         RawNewsItem(f"Release {index}", f"https://e.test/{index}", "vendor", SourceType.RSS, None)
         for index in range(55)
     )
-    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "ro", 5)
+    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "en", 5)
     responses = tuple(
         _triage_response(range(start, min(start + 25, len(items)))) for start in (0, 25, 50)
     )
@@ -170,7 +190,7 @@ def test_triage_batch_failure_returns_no_partial_summaries() -> None:
         RawNewsItem(f"Release {index}", f"https://e.test/{index}", "vendor", SourceType.RSS, None)
         for index in range(30)
     )
-    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "ro", 5)
+    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "en", 5)
     payloads: list[JsonObject] = []
     client = RecordingHttpClient(
         (_triage_response(range(25)), {"message": {"content": "nope"}}),
