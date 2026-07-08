@@ -153,7 +153,7 @@ watermark_dir: {watermark_dir}
         items: tuple[RawNewsItem, ...],
         *_args: object,
     ) -> TriageResult:
-        return TriageResult({item.url: "Rezumat" for item in items})
+        return TriageResult({item.url: "Summary" for item in items})
 
     monkeypatch.setattr("news_hermes.tools.collect_items", fake_collect_items)
     monkeypatch.setattr("news_hermes.tools.triage_items", fake_triage_items)
@@ -170,7 +170,7 @@ watermark_dir: {watermark_dir}
     stored = NewsStore(path).load()
     assert not isinstance(stored, str)
     assert [item.url for item in stored.items] == [new_item.url]
-    assert stored.items[0].summary == "Rezumat"
+    assert stored.items[0].summary == "Summary"
 
 
 def test_news_pull_watermark_keeps_at_most_500_ids(

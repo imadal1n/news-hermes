@@ -81,7 +81,7 @@ def default_config() -> NewsConfig:
             ollama_endpoint="http://127.0.0.1:11434",
             model="ornith:35b",
             temperature=0.3,
-            language="ro",
+            language="en",
             max_items_per_source=5,
             system_prompt=None,
         ),

@@ -35,12 +35,12 @@ def test_ingest_deduplicates_by_url(tmp_path: Path) -> None:
     raw = RawNewsItem("Release", "https://example.test/a", "vendor", SourceType.RSS, None)
 
     # When: both are ingested.
-    result = store.ingest((raw, raw), {raw.url: "Rezumat"})
+    result = store.ingest((raw, raw), {raw.url: "Summary"})
 
     # Then: one item is stored with the triage summary.
     assert not isinstance(result, str)
     assert len(result.items) == 1
-    assert result.items[0].summary == "Rezumat"
+    assert result.items[0].summary == "Summary"
     assert result.items[0].source_type == SourceType.RSS
 
 

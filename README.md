@@ -37,7 +37,7 @@ Example storage file:
       "id": "news_8f4f1d2a9c31",
       "title": "Model runtime released",
       "url": "https://example.test/release",
-      "summary": "Rezumat concis.",
+      "summary": "Concise summary.",
       "source": "vendor-blog",
       "source_type": "rss",
       "status": "new",
@@ -170,7 +170,7 @@ triage:
   ollama_endpoint: http://127.0.0.1:11434
   model: ornith:35b
   temperature: 0.3
-  language: ro
+  language: en
   max_items_per_source: 5
   system_prompt: >
     You are a tech news triage filter. Keep only actionable technical news and
