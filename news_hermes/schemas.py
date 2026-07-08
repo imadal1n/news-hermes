@@ -67,8 +67,11 @@ NEWS_SOURCE_ADD: Final[JsonObject] = {
         "type": "object",
         "properties": {
             "name": {"type": "string", "description": "Source name."},
-            "url": {"type": "string", "description": "RSS feed URL or SearXNG endpoint."},
-            "type": {"type": "string", "description": "rss or searxng."},
+            "url": {
+                "type": "string",
+                "description": "RSS feed URL, SearXNG endpoint, or GitHub releases API URL.",
+            },
+            "type": {"type": "string", "description": "rss, searxng, or github_releases."},
             "query": {"type": "string", "description": "Required for searxng sources."},
         },
         "required": ["name", "url", "type"],
