@@ -172,6 +172,25 @@ def test_triage_parses_json_array_from_markdown_fenced_content() -> None:
     assert summaries.error is None
 
 
+def test_triage_parses_raw_json_array_after_think_block() -> None:
+    # Given: Ollama emits hidden reasoning before the requested raw JSON array.
+    item = RawNewsItem("Release", "https://e.test", "vendor", SourceType.RSS, None)
+    config = TriageConfig("http://localhost:11434", "ornith:35b", 0.3, "en", 5)
+    response: JsonObject = {
+        "message": {
+            "content": '<think>Reasoning\nmore reasoning</think>[{"url":"https://e.test","summary":"Summary"}]',
+        },
+    }
+    client = FakeHttpClient("", response)
+
+    # When: triage runs.
+    summaries = triage_items((item,), config, client)
+
+    # Then: the reasoning block is stripped before JSON parsing.
+    assert summaries.summaries == {"https://e.test": "Summary"}
+    assert summaries.error is None
+
+
 def test_triage_parses_json_array_from_inline_markdown_fence() -> None:
     # Given: Ollama returns fenced JSON on one line.
     item = RawNewsItem("Release", "https://e.test", "vendor", SourceType.RSS, None)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from http.client import HTTPConnection, HTTPSConnection
 from typing import TYPE_CHECKING, Final, Protocol
@@ -239,6 +240,7 @@ def _summaries(values: list[JsonValue]) -> dict[str, str]:
 
 def _json_content(content: str) -> str:
     stripped = content.strip()
+    stripped = re.sub(r"<think>.*?</think>", "", stripped, flags=re.DOTALL).strip()
     start = stripped.find(JSON_FENCE)
     if start == -1:
         return stripped
